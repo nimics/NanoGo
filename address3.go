@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 type T struct {
 	x, y int
 }
@@ -7,5 +9,5 @@ type T struct {
 func main() {
 	t := new(T)
 	t.x = 1
-	fmt.print(t.x)
+	fmt.Print(t.x)
 }
