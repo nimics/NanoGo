@@ -237,8 +237,17 @@ and expr_desc env loc = function
     let l = List.map dep_expr_desc el in
     check_variables loc l; (* si il ya un Tmany il doit être le seul *)
     let vartype_list = List.map (fun v -> v.v_typ) f.fn_params in
-    if (List.compare_lengths vartype_list el) <> 0 then error loc "function called with the wrong number of parameters";
-    if not(List.equal eq_type vartype_list (List.map (fun e -> e.expr_typ) l)) then error loc "function called with wrong type parameters";
+    begin match (List.map (fun x -> x.expr_typ) l) with
+      | [Tmany(li)] -> 
+        Printf.printf "%s, %d, %d\n" id.id (List.length(vartype_list)) (List.length(li));
+        if (List.length(vartype_list) <> List.length(li)) then error loc "1function called with the wrong number of parameters";
+        if not(List.equal eq_type vartype_list li) then error loc "1function called with wrong type parameters"
+
+      | a :: q ->
+        Printf.printf "%s, %d, %d\n" id.id (List.length(vartype_list)) (List.length(el));
+        if List.length(vartype_list) <> List.length(el) then error loc "2function called with the wrong number of parameters";
+        if not(List.equal eq_type vartype_list (List.map (fun e -> e.expr_typ) l)) then error loc "2function called with wrong type parameters"
+    end;
     let typ = match l with
       | [] -> tvoid
       | [e] -> e.expr_typ
@@ -294,11 +303,20 @@ and expr_desc env loc = function
 
     let dep_expr_desc e = (let (enew, rt) = expr env e in enew) in
     let elvl = List.map dep_expr_desc lvl in 
+    if not( List.for_all check_lvalue (List.map (fun e -> e.expr_desc) elvl) ) then error loc "Can only assign l-values";
     let l = List.map dep_expr_desc el in
     check_variables loc l; (* si il ya un Tmany il doit être le seul *)
-    if List.compare_lengths elvl l <> 0 then error loc "assigned wrong number of l-values";
-    if not( List.for_all check_lvalue (List.map (fun e -> e.expr_desc) elvl) ) then error loc "Can only assign l-values";
-    if not( List.equal eq_type (List.map (fun e -> e.expr_typ) l) (List.map (fun e -> e.expr_typ) elvl) ) then error loc "Wrong types assigned";
+    begin match (List.map (fun x -> x.expr_typ) l) with
+      | [Tmany(li)] -> 
+        
+        if (List.length(elvl) <> List.length(li)) then error loc "1assigned wrong number of l-values";
+        if not(List.equal eq_type (List.map (fun e -> e.expr_typ) elvl) li) then error loc "1function called with wrong type parameters"
+
+      | a :: q ->
+        
+        if List.length(elvl) <> List.length(l) then error loc "2assigned wrong number of l-values";
+        if not(List.equal eq_type (List.map (fun e -> e.expr_typ) elvl) (List.map (fun e -> e.expr_typ) l)) then error loc "2function called with wrong type parameters"
+    end;
     TEassign (elvl, l), tvoid, false 
 
   | PEreturn el ->
@@ -320,7 +338,7 @@ and expr_desc env loc = function
 
       | ({pexpr_desc = PEvars(x, _ ,li); pexpr_loc = loc} as a) :: q ->
 
-        let exp, rt = expr env a in
+        let exp, rt = expr envi a in
         let TEvars(vars, list) = exp.expr_desc in
         block_aux (add_to_env envi vars) (exp :: l) ty_returned returnfound q
 
@@ -508,10 +526,12 @@ let decl = function
 
     (* on construit fn_params (varli) ainsi que l'environnement (envi) *)
     begin let (varli, envi) = paramli_to_varli [] pl in
+    Printf.printf "%s, %d \n" id (List.length(varli));
     (* on construit fn_type *)
     let typli = List.map type_type tyl in
     (* function créée *)
     let f = { fn_name = id; fn_params = varli; fn_typ = typli} in
+    Hashtbl.replace structure_fun id f;
     (* on verifie qu'on type e dans envi
        on récupère l'expression et un booléen indiquant si elle possède un return *)
     let (expression, rt) = expr envi e in
