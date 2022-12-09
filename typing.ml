@@ -46,7 +46,7 @@ let rec eq_type ty1 ty2 = match ty1, ty2 with
   | Tint, Tint | Tbool, Tbool | Tstring, Tstring -> true
   | Tstruct s1, Tstruct s2 -> s1 == s2
   | Tptr ty1, Tptr ty2 -> eq_type ty1 ty2
-  | Twild, _ | _, Twild -> true
+  | Tptr(Twild), _ | _, Tptr(Twild) -> true
   | Tmany(l1), Tmany(l2) -> 
     if List.compare_lengths l1 l2 <> 0 then false
     else if not(List.for_all2 eq_type l1 l2) then false
@@ -271,7 +271,9 @@ and expr_desc env loc = function
     
   | PEident {id=id} ->
 
-    (try let v = Env.find id env in begin Printf.printf "found variable\n";  TEident v, v.v_typ, false end
+    (try let v = Env.find id env in begin Printf.printf "found variable\n";
+      v.v_used <- true;
+      TEident v, v.v_typ, false end
     with Not_found -> error loc ("unbound variable " ^ id))
 
   | PEdot (e, id) ->
@@ -311,12 +313,12 @@ and expr_desc env loc = function
     begin 
     let rec add_to_env environ vars = match vars with
       | [] -> environ
-      | a :: q -> add_to_env (Env.add environ a) q
+      | a :: q -> let (newenv, v) = (Env.var a.v_name a.v_loc a.v_typ environ) in add_to_env newenv q
     in let rec block_aux envi l ty_returned returnfound el = match el with
 
       | [] -> TEblock(l), ty_returned, returnfound
 
-      | ({pexpr_desc = PEvars(x,None,li); pexpr_loc = loc} as a) :: q ->
+      | ({pexpr_desc = PEvars(x, _ ,li); pexpr_loc = loc} as a) :: q ->
 
         let exp, rt = expr env a in
         let TEvars(vars, list) = exp.expr_desc in
@@ -345,7 +347,6 @@ and expr_desc env loc = function
 
     let dep_expr_desc e = (let (enew, rt) = expr env e in enew) in
     let l = List.map dep_expr_desc el in
-    if List.exists (fun e -> e.expr_desc = TEnil) l then error loc "cannot assign type void to variables";
     check_variables loc l;
     let compare_len li1 li2 =
       if (List.compare_lengths li1 li2) <> 0 then error loc "not assigning the right number of expressions to variables" in
@@ -369,13 +370,14 @@ and expr_desc env loc = function
 
         compare_len params li;
         let t = type_type typ in
-        if List.exists (fun ty -> ty <> t) li then error loc "expressions need to be of given type";
+        if List.exists (fun ty -> eq_type ty t) li then error loc "expressions need to be of given type";
         let vars = make_vars params t in
         TEvars(vars, [e]), tvoid, false
 
       | (None, l) ->
 
         compare_len params l;
+        if List.exists (fun e -> e.expr_desc = TEnil) l then error loc "cannot assign type void to variables";
         let vars = make_vartyp params (List.map (fun e -> e.expr_typ) l) in
         TEvars(vars, l), tvoid, false
 
@@ -383,7 +385,7 @@ and expr_desc env loc = function
 
         compare_len params l;
         let t = type_type typ in
-        if List.exists (fun e -> e.expr_typ <> t) l then error loc "expressions need to be of given type";
+        if List.exists (fun e -> eq_type e.expr_typ t) l then error loc "expressions need to be of given type";
         let vars = make_vars params t in
         TEvars(vars, l), tvoid, false
     end
