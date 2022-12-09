@@ -261,7 +261,7 @@ and expr_desc env loc = function
     let exp2, rt2 = expr env b in
     let ty1 = exp1.expr_typ in
     let ty2 = exp2.expr_typ in
-    if ty1 <> Tbool then error e.pexpr_loc "Condition in for loop is not boolean";
+    if not(eq_type ty1 Tbool) then error e.pexpr_loc "Condition in for loop is not boolean";
     TEfor(exp1, exp2), ty2, rt2
 
   | PEif (e1, e2, e3) ->
@@ -272,8 +272,8 @@ and expr_desc env loc = function
     let ty1 = exp1.expr_typ in
     let ty2 = exp2.expr_typ in
     let ty3 = exp3.expr_typ in
-    if ty1 <> Tbool then error e1.pexpr_loc "Condition in if clause is not boolean";
-    if ty2 <> ty3 then error loc "Same type expected in if clause";
+    if not(eq_type ty1 Tbool) then error e1.pexpr_loc "Condition in if clause is not boolean";
+    if eq_type ty2 ty3 then error loc "Same type expected in if clause";
     TEif(exp1, exp2, exp3), ty2, (rt2 && rt3)
 
   | PEnil -> TEnil, Tptr(Twild), false 
@@ -428,12 +428,10 @@ let phase1 = function
 
 
 
-
-
-let sizeof = function
+let rec sizeof = function
   | Tint | Tbool | Tstring | Tptr _ -> 8
-  | _ -> (* TODO *) assert false 
-
+  | Tmany l -> List.fold_left (fun i x -> i + sizeof x) 0 l
+  | Tstruct s -> Hashtbl.fold (fun _ b c -> c + sizeof (b.f_typ)) s.s_fields 0
 
 
 
@@ -442,12 +440,18 @@ let checkmain f =
   then error f.pf_name.loc "Fonction main mal typée"
   else found_main := true
 
-let rec check_type = function
+
+  let rec check_type = function
   | PTident { id = "int" }
   | PTident { id = "bool" }
   | PTident { id = "string" } -> ()
   | PTptr ty -> check_type ty
-  | PTident t -> error t.loc (Printf.sprintf "unknown type %s" t.id)
+  | PTident id -> 
+    try 
+      Hashtbl.find structure_table id.id; ()
+    with _ -> 
+    error id.loc (Printf.sprintf "unknown type %s" id.id)
+
 
 let check_typelist tyl = List.iter check_type tyl
 
@@ -535,15 +539,14 @@ let decl = function
     (* on verifie qu'on type e dans envi
        on récupère l'expression et un booléen indiquant si elle possède un return *)
     let (expression, rt) = expr envi e in
-    (* on vérifie que le return n'existe pas ssi expression est de type Tvoid *)
-    if not(rt) && tyl <> [] then error loc (Printf.sprintf "function %s has no return instruction" id);
-    if rt && tyl = [] then error loc (Printf.sprintf "function %s shouldn't have a return instruction" id);
-    (* on vérifie que le return renvoit bien ce qu'il faut *)
-    match typli with | [t] -> if [expression.expr_typ] <> typli then error loc (Printf.sprintf "function %s does not return expected type" id)
-      else TDfunction (f, expression)
-    |_ -> if expression.expr_typ <> Tmany(typli) then error loc (Printf.sprintf "function %s does not return expected type" id)
-      else TDfunction (f, expression)
-    (* on vérifie que toutes les variables sont bien utilisée à la fin ? *)
+    (* on vérifie que le return n'existe pas ssi expression est de type Tvoid on vérifie que le return renvoit bien ce qu'il faut *)
+    begin match (rt, typli) with
+      | (false, a::q) -> if (not(eq_type a tvoid) && q=[]) then error loc (Printf.sprintf "function %s has no return instruction" id)
+      | (true, tvoid) -> error loc (Printf.sprintf "function %s shouldn't have a return instruction" id)
+      | (true, [t] ) -> if not( eq_type expression.expr_typ t ) then error loc (Printf.sprintf "function %s does not return expected type" id)
+      | (true, _) -> if not(eq_type (expression.expr_typ) (Tmany(typli))) then error loc (Printf.sprintf "function %s does not return expected type" id)
+    end;
+    TDfunction (f, expression)
     end
 
   | PDstruct {ps_name={id}; ps_fields = pl} ->
